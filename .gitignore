@@ -1,0 +1,17 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# 虚拟环境
+.venv/
+
+# Data files
+data/
+*.pt
+*.h5
+*.gz
+*.csv
+
+# Figures / Results
+figs/
+results/
