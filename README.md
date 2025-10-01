@@ -1,5 +1,5 @@
 ## v1
-数据集：Visium_Human_Lymph_Node (人类淋巴结)  下载地址：https://www.10xgenomics.com/datasets/human-lymph-node-1-standard-1-1-0?utm_source=chatgpt.com
+数据集：Visium_Human_Lymph_Node (人类淋巴结)  下载地址：https://www.10xgenomics.com/datasets/human-lymph-node-1-standard-1-1-0?utm_source=chatgpt.com \n
 LR计算方式：lig_expr * rec_expr
 距离计算方式：欧式距离
 正负样本判别方式：正样本为该spot所有边LR值前百分之20，负样本为剩余百分之80 (该正负判别仅仅为了跑通pipline)
