@@ -2,7 +2,7 @@
 
 ## 数据集
 - **名称**: Visium_Human_Lymph_Node (人类淋巴结)  
-- **下载地址**: [10x Genomics - Human Lymph Node](https://www.10xgenomics.com/datasets/human-lymph-node-1-standard-1-1-0?utm_source=chatgpt.com)
+- **下载地址**: [10x Genomics - Human Lymph Node](https://www.10xgenomics.com/datasets/human-lymph-node-1-standard-1-1-0)
 
 ## 特征构造
 - **LR 计算方式**: `lig_expr * rec_expr`  
@@ -24,3 +24,13 @@
 - MLP 输出边的打分 (logit)  
 - 与正负样本标签计算二分类交叉熵损失
 - 反向传播更新参数
+
+# SpatialSelf v1.5
+
+## 数据集
+- **名称**: Visium_Human_Lymph_Node (人类淋巴结)  
+- **下载地址**: [10x Genomics - Human Lymph Node](https://www.10xgenomics.com/datasets/human-lymph-node-1-standard-1-1-0)
+- **名称**: Human Lung Cancer (FFPE) (人类肺癌样本)  
+- **下载地址**: [ human lung cancer (FFPE)](https://www.10xgenomics.com/datasets/human-lung-cancer-11-mm-capture-area-ffpe-2-standard)
+- **名称**: uman breast cancer(formalin-fixed paraffin-embedded, FFPE) (人类乳腺癌样本)  
+- **下载地址**: [ uman breast cancer(formalin-fixed paraffin-embedded, FFPE)](https://www.10xgenomics.com/datasets/human-lung-cancer-11-mm-capture-area-ffpe-2-standard)
