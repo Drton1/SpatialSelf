@@ -4,83 +4,172 @@ import pandas as pd
 import torch
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.neighbors import NearestNeighbors
+from sklearn.neighbors import NearestNeighbors, KDTree
 from torch_geometric.data import Data
+from scipy import sparse
 
 # -----------------------------
 # 路径配置
 # -----------------------------
-DATA_DIR = "C:/Users/Drton1/PycharmProjects/SpatialSelf/data/Visium_Human_Lymph_Node"
-OUTPUT_FILE = "../data/E1_slide1.pt"
+DATA_ROOT = "../data/"
+OUTPUT_ROOT = "../data/processed_graphs"
+
+SLIDES = [
+    "Visium_Human_Lymph_Node",
+    "Human Breast Cancer",
+    "Human Lung Tissue"
+]
+
+LR_PAIRS_PATH = "../data/lr_pairs_1.csv"  # 你的 LR 配对表
 
 # -----------------------------
-# 1. 读取表达矩阵 (MTX)
+# 工具函数
 # -----------------------------
-adata = sc.read_10x_mtx(
-    os.path.join(DATA_DIR, "filtered_feature_bc_matrix"),
-    var_names="gene_symbols",   # 用 gene symbols 作为基因名
-    make_unique=True
-)
+def _to_dense(x):
+    if sparse.issparse(x):
+        return x.toarray()
+    return np.asarray(x)
+
+def read_coords(slide_path: str):
+    """读取空间坐标"""
+    pos_file = None
+    for candidate in ["tissue_positions_list.csv", "tissue_positions.csv"]:
+        cand_path = os.path.join(slide_path, "spatial", candidate)
+        if os.path.exists(cand_path):
+            pos_file = cand_path
+            break
+    if pos_file is None:
+        raise FileNotFoundError(f"No tissue_positions file under {slide_path}")
+    positions = pd.read_csv(pos_file, header=None).set_index(0)
+    return positions
+
+def add_lr_topm_edges(expr, gene_names, coords, radius, m, lr_pairs):
+    """在半径邻域内选 LR 值最高的 m 条边"""
+    gene2idx = {g.upper(): i for i, g in enumerate(gene_names)}
+    tree = KDTree(coords)
+    neighbors = tree.query_radius(coords, r=radius)
+
+    lr_edges = set()
+    for i in range(len(coords)):
+        cand = neighbors[i]
+        cand = cand[cand != i]
+        if cand.size == 0:
+            continue
+
+        scores = []
+        for j in cand:
+            score = 0.0
+            for _, row in lr_pairs.iterrows():
+                lig, rec = row["partner_a"].upper(), row["partner_b"].upper()
+                if lig in gene2idx and rec in gene2idx:
+                    score += float(expr[i, gene2idx[lig]] * expr[j, gene2idx[rec]])
+                    score += float(expr[j, gene2idx[lig]] * expr[i, gene2idx[rec]])  # 双向
+            scores.append((int(j), score))
+
+        scores.sort(key=lambda x: -x[1])  # 按 LR 值排序
+        for j, _ in scores[:m]:
+            lr_edges.add((i, j))
+
+    return lr_edges
 
 # -----------------------------
-# 2. 读取空间坐标，并和 barcodes 对齐
+# 核心处理函数
 # -----------------------------
-barcodes = pd.read_csv(
-    os.path.join(DATA_DIR, "filtered_feature_bc_matrix", "barcodes.tsv.gz"),
-    header=None
-)[0].tolist()
+def process_slide(
+    slide_name,
+    k=6,
+    n_hvg=2500,
+    pca_dim=256,
+    radius=150.0,
+    m=20
+):
+    slide_path = os.path.join(DATA_ROOT, slide_name)
+    fmat_path = os.path.join(slide_path, "filtered_feature_bc_matrix")
 
-positions = pd.read_csv(
-    os.path.join(DATA_DIR, "spatial", "tissue_positions_list.csv"),
-    header=None
-)
+    # 1) 表达矩阵
+    if os.path.exists(fmat_path):
+        h5_files = [f for f in os.listdir(fmat_path) if f.endswith(".h5")]
+        if len(h5_files) > 0:
+            print(f"🔹 Using H5 for {slide_name}")
+            adata = sc.read_10x_h5(os.path.join(fmat_path, h5_files[0]))
+        else:
+            print(f"🔹 Using MTX for {slide_name}")
+            adata = sc.read_10x_mtx(
+                fmat_path,
+                var_names="gene_symbols",
+                make_unique=True
+            )
+    else:
+        h5_files = [f for f in os.listdir(slide_path) if f.endswith(".h5")]
+        if len(h5_files) == 0:
+            raise FileNotFoundError(f"No expression matrix found for {slide_name}")
+        print(f"🔹 Using H5 (root) for {slide_name}")
+        adata = sc.read_10x_h5(os.path.join(slide_path, h5_files[0]))
 
-# 对齐 barcodes（只保留有表达的 spot）
-positions = positions[positions[0].isin(barcodes)]
-positions = positions.set_index(0).loc[barcodes]
+    if "gene_symbols" in adata.var.columns:
+        adata.var_names = adata.var["gene_symbols"]
+    adata.var_names_make_unique()
 
-# 取最后两列作为 (x, y) 坐标（兼容不同 SpaceRanger 版本）
-adata.obsm["spatial"] = positions.iloc[:, -2:].values
+    # 2) 空间坐标
+    positions = read_coords(slide_path)
+    barcodes = list(adata.obs_names)
+    positions = positions.loc[barcodes]
+    coords = positions.iloc[:, -2:].astype(float).values
+    adata.obsm["spatial"] = coords
+    assert adata.n_obs == coords.shape[0], f"Spot mismatch: {adata.n_obs} vs {coords.shape[0]}"
+    print(f" Spot aligned: {adata.n_obs} spots")
+
+    # 3) 标准化
+    sc.pp.normalize_total(adata, target_sum=1e4)
+    sc.pp.log1p(adata)
+
+    # 4) HVG + PCA
+    sc.pp.highly_variable_genes(adata, n_top_genes=n_hvg, subset=False)
+    adata_hvg = adata[:, adata.var["highly_variable"]]
+    X_pca = PCA(n_components=pca_dim).fit_transform(_to_dense(adata_hvg.X))
+
+    # 5) 读取 LR 配对
+    lr_pairs = pd.read_csv(LR_PAIRS_PATH)
+
+    # 6) KNN 边
+    nbrs = NearestNeighbors(n_neighbors=k).fit(coords)
+    knn_graph = nbrs.kneighbors_graph(coords).tocoo()
+    edge_set = set(zip(knn_graph.row.astype(int), knn_graph.col.astype(int)))
+
+    # 7) LR-topm 边
+    raw_expr = _to_dense(adata.X)
+    lr_edges = add_lr_topm_edges(raw_expr, adata.var_names, coords, radius, m, lr_pairs)
+
+    # 8) 合并边
+    all_edges = list(edge_set.union(lr_edges))
+    edge_index = np.array(all_edges, dtype=np.int64).T
+
+    # 9) PyG Data（不含 edge_attr）
+    data = Data(
+        x=torch.tensor(X_pca, dtype=torch.float32),
+        edge_index=torch.tensor(edge_index, dtype=torch.long),
+        pos=torch.tensor(coords, dtype=torch.float32),
+        raw_expr=torch.tensor(raw_expr, dtype=torch.float32),
+        gene_names=list(adata.var_names)
+    )
+
+    os.makedirs(OUTPUT_ROOT, exist_ok=True)
+    safe_name = slide_name.replace(" ", "_")
+    out_path = os.path.join(OUTPUT_ROOT, f"{safe_name}.pt")
+    torch.save(data, out_path)
+
+    print(f"✅ Saved {slide_name} to {out_path}")
+    print(f"   Nodes: {data.num_nodes}, PCA Features: {data.x.shape[1]}")
+    print(f"   Raw expr: {tuple(data.raw_expr.shape)}, Genes: {len(data.gene_names)}")
+    print(f"   Edges: {data.edge_index.shape[1]}")
+    print(f"   KNN edges: {len(edge_set)}, LR-topm edges: {len(lr_edges)}, Union: {len(all_edges)}")
+    print("-" * 50)
+    return data
 
 # -----------------------------
-# 3. 标准化
+# 主程序
 # -----------------------------
-sc.pp.normalize_total(adata, target_sum=1e4)
-sc.pp.log1p(adata)
-
-# -----------------------------
-# 4. HVG for PCA (不做 subset)
-# -----------------------------
-sc.pp.highly_variable_genes(adata, n_top_genes=2500, subset=False)
-
-# PCA 只用 HVG
-adata_hvg = adata[:, adata.var["highly_variable"]]
-pca = PCA(n_components=256)
-X_pca = pca.fit_transform(adata_hvg.X.toarray())
-
-# -----------------------------
-# 5. 构建图 (kNN, k=6)
-# -----------------------------
-coords = adata.obsm["spatial"]
-nbrs = NearestNeighbors(n_neighbors=6).fit(coords)
-edge_index = nbrs.kneighbors_graph(coords).tocoo()
-edge_index = np.vstack((edge_index.row, edge_index.col))
-
-# -----------------------------
-# 6. 保存为 PyG Data
-# -----------------------------
-data = Data(
-    x=torch.tensor(X_pca, dtype=torch.float),                     # HVG PCA 特征
-    edge_index=torch.tensor(edge_index, dtype=torch.long),        # 邻接
-    pos=torch.tensor(coords, dtype=torch.float),                  # 空间坐标
-    raw_expr=torch.tensor(adata.X.toarray(), dtype=torch.float),  # 全量表达矩阵
-    gene_names=list(adata.var_names)                              # 全部基因名
-)
-
-os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-torch.save(data, OUTPUT_FILE)
-
-print(f"Graph data saved to {OUTPUT_FILE}")
-print(f"Nodes: {data.x.shape[0]}, PCA Features: {data.x.shape[1]}")
-print(f"Raw expr shape: {data.raw_expr.shape}, Genes: {len(data.gene_names)}")
-print(f"Edges: {data.edge_index.shape[1]}")
+if __name__ == "__main__":
+    os.makedirs(OUTPUT_ROOT, exist_ok=True)
+    for slide in SLIDES:
+        process_slide(slide)

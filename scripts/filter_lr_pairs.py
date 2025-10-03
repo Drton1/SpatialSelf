@@ -6,7 +6,7 @@ features_path = "../data/Visium_Human_Lymph_Node/filtered_feature_bc_matrix/feat
 interaction_path = "../data/L-Rgene/interaction_input.csv"
 gene_input_path = "../data/L-Rgene/gene_input.csv"
 complex_input_path = "../data/L-Rgene/complex_input.csv"
-out_path = "../data/lr_pairs.csv"
+out_path = "../data/lr_pairs_1.csv"
 
 # 1. Visium 基因
 features = pd.read_csv(features_path, sep="\t", header=None)
