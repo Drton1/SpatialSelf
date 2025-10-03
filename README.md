@@ -27,18 +27,42 @@
 
 # SpatialSelf v1.5
 
-## 数据集
-- **名称**: Visium_Human_Lymph_Node (人类淋巴结)  
-- **下载地址**: [10x Genomics - Human Lymph Node](https://www.10xgenomics.com/datasets/human-lymph-node-1-standard-1-1-0)
-- **名称**: Human Lung Cancer (FFPE) (人类肺癌样本)  
-- **下载地址**: [ human lung cancer (FFPE)](https://www.10xgenomics.com/datasets/human-lung-cancer-11-mm-capture-area-ffpe-2-standard)
-- **名称**: Human breast cancer(formalin-fixed paraffin-embedded, FFPE) (人类乳腺癌样本)  
-- **下载地址**: [ Human breast cancer(formalin-fixed paraffin-embedded, FFPE)]([https://www.10xgenomics.com/datasets/human-lung-cancer-11-mm-capture-area-ffpe-2-standard](https://www.10xgenomics.com/datasets/human-breast-cancer-visium-fresh-frozen-whole-transcriptome-1-standard)
+##  数据集
+- **Visium Human Lymph Node (fresh-frozen)**  
+  [下载链接](https://www.10xgenomics.com/datasets/human-lymph-node-1-standard-1-1-0)
 
-## 改动
-- 由单数据集，改为多数据集，train为Lymph_Node和breast cance构建的图数据集，val和test为Lung_Cancer图数据集
-- 图的边的选取由保留每个点的 k 个最近邻近边，新增在半径邻域内计算 LR 分数（基于 lr_pairs.csv），为每个点挑出 LR 值最高的 m 条边，最好保留的边取两个边集合的交集。
-- 在构造边特征的时，LR的计算方式增加了复合体的计算，通过读取complex_input.csv，找出复合体的LR基因，在 LR 计算时取几何平均。（后面可以根据生物意义需要改为选取max值），以及对[lr_score, dist]边特征进行标准化，保证数量级一致。
+- **Human Lung Cancer (FFPE)**  
+  [下载链接](https://www.10xgenomics.com/datasets/human-lung-cancer-11-mm-capture-area-ffpe-2-standard)
+
+- **Human Breast Cancer ( Fresh-frozen)**  
+  [下载链接](https://www.10xgenomics.com/datasets/human-breast-cancer-visium-fresh-frozen-whole-transcriptome-1-standard)
+
+---
+
+##  改动说明
+
+### 1. 多数据集支持
+- 由单数据集 (Lymph Node) → 扩展为多数据集：  
+  - **Train**: Lymph Node + Breast Cancer  
+  - **Val/Test**: Lung Cancer  
+
+### 2. 图边构建优化
+- **原始方法**: 每个点保留 k 近邻边 (k=6)  
+- **改进方法**: 在半径邻域内计算 LR score，挑选 top-m 边  
+- **最终边集**: `kNN 边 ∩ LR-top-m 边`，兼顾空间邻近和 LR 信号强度  
+
+### 3. LR score 计算增强
+- 支持 **复合受体 (complex receptor)**，基于 `complex_input.csv`  
+- 多亚基复合体 → 取 **几何平均** (可选 max)  
+- 基因表达 → **log1p + quantile scaling [0,1]** → 再计算 LR，更稳健  
+
+### 4. 边特征归一化
+- Edge features = `[LR score, distance]`  
+- 在 **训练集拟合 StandardScaler**，对 val/test 仅做 transform，保证数值量级一致  
+
+---
+
+
 
 
 
