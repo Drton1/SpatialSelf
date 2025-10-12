@@ -118,7 +118,7 @@ if __name__ == "__main__":
         "Human_Breast_Cancer.pt",
         "Human_Lung_Tissue.pt"
     ]
-    lr_pairs_path = "../data/lr_pairs_1.csv"
+    lr_pairs_path = "../data/lr_results/clean_lr_pairs.csv"
     complex_path = "../data/L-Rgene/complex_input.csv"
     OUT_DIR = "../data/with_edge_attr"
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -126,8 +126,8 @@ if __name__ == "__main__":
     # 1. 加载 L-R 配对和复合受体
     lr_pairs = pd.read_csv(lr_pairs_path)
     complex_dict = load_complex_dict(complex_path)
-    print(f"✅ L-R 配对总数: {len(lr_pairs)}")
-    print(f"✅ 复合受体数量: {len(complex_dict)}")
+    print(f" L-R 配对总数: {len(lr_pairs)}")
+    print(f" 复合受体数量: {len(complex_dict)}")
 
     # 2. 遍历切片
     for i, slide_file in enumerate(SLIDES):

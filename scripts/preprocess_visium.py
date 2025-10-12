@@ -20,7 +20,7 @@ SLIDES = [
     "Human Lung Tissue"
 ]
 
-LR_PAIRS_PATH = "../data/lr_pairs_1.csv"  # 你的 LR 配对表
+LR_PAIRS_PATH = "../data/lr_pairs_1.csv"  # LR 配对表
 
 # -----------------------------
 # 工具函数
@@ -72,6 +72,34 @@ def add_lr_topm_edges(expr, gene_names, coords, radius, m, lr_pairs):
 
     return lr_edges
 
+def assign_best_lr_pair(expr, gene_names, edges, lr_pairs):
+    """
+    为每条边分配最强 LR 对
+    expr: (n_spots, n_genes)
+    gene_names: 基因名
+    edges: [(i,j), ...]
+    lr_pairs: DataFrame, 包含 partner_a, partner_b
+    """
+    gene2idx = {g.upper(): i for i, g in enumerate(gene_names)}
+    edge_lr_pairs = []
+
+    for (i, j) in edges:
+        best_pair = "NA"
+        best_score = 0.0
+        for _, row in lr_pairs.iterrows():
+            lig, rec = row["partner_a"].upper(), row["partner_b"].upper()
+            if lig in gene2idx and rec in gene2idx:
+                s1 = float(expr[i, gene2idx[lig]] * expr[j, gene2idx[rec]])
+                s2 = float(expr[j, gene2idx[lig]] * expr[i, gene2idx[rec]])
+                if s1 > best_score:
+                    best_score = s1
+                    best_pair = f"{lig}|{rec}"
+                if s2 > best_score:
+                    best_score = s2
+                    best_pair = f"{lig}|{rec}"
+        edge_lr_pairs.append(best_pair)
+    return edge_lr_pairs
+
 # -----------------------------
 # 核心处理函数
 # -----------------------------
@@ -90,10 +118,10 @@ def process_slide(
     if os.path.exists(fmat_path):
         h5_files = [f for f in os.listdir(fmat_path) if f.endswith(".h5")]
         if len(h5_files) > 0:
-            print(f"🔹 Using H5 for {slide_name}")
+            print(f" Using H5 for {slide_name}")
             adata = sc.read_10x_h5(os.path.join(fmat_path, h5_files[0]))
         else:
-            print(f"🔹 Using MTX for {slide_name}")
+            print(f" Using MTX for {slide_name}")
             adata = sc.read_10x_mtx(
                 fmat_path,
                 var_names="gene_symbols",
@@ -144,13 +172,17 @@ def process_slide(
     all_edges = list(edge_set.union(lr_edges))
     edge_index = np.array(all_edges, dtype=np.int64).T
 
-    # 9) PyG Data（不含 edge_attr）
+    # 9) 计算每条边最强的 LR 对名称
+    edge_lr_pairs = assign_best_lr_pair(raw_expr, adata.var_names, all_edges, lr_pairs)
+
+    # 10) PyG Data（包含 edge_lr_pairs）
     data = Data(
         x=torch.tensor(X_pca, dtype=torch.float32),
         edge_index=torch.tensor(edge_index, dtype=torch.long),
         pos=torch.tensor(coords, dtype=torch.float32),
         raw_expr=torch.tensor(raw_expr, dtype=torch.float32),
-        gene_names=list(adata.var_names)
+        gene_names=list(adata.var_names),
+        edge_lr_pairs=edge_lr_pairs
     )
 
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
@@ -158,11 +190,12 @@ def process_slide(
     out_path = os.path.join(OUTPUT_ROOT, f"{safe_name}.pt")
     torch.save(data, out_path)
 
-    print(f"✅ Saved {slide_name} to {out_path}")
+    print(f"   Saved {slide_name} to {out_path}")
     print(f"   Nodes: {data.num_nodes}, PCA Features: {data.x.shape[1]}")
     print(f"   Raw expr: {tuple(data.raw_expr.shape)}, Genes: {len(data.gene_names)}")
     print(f"   Edges: {data.edge_index.shape[1]}")
     print(f"   KNN edges: {len(edge_set)}, LR-topm edges: {len(lr_edges)}, Union: {len(all_edges)}")
+    print(f"   edge_lr_pairs saved: {len(edge_lr_pairs)}")
     print("-" * 50)
     return data
 
